@@ -1,87 +1,46 @@
 module Bulkdom
   class DomainList
-    attr_accessor :list, :tlds, :results, :processed
-    
+    attr_accessor :list, :tlds, :results, :processed, :verbose
+
     def initialize()
       @list, @tlds = ["example"], [".com"]
-      @processed = false
+      @processed = 0
+      @results = Hash.new { |h, k| h[k] = {} }
     end
-    
-    def process
-      self.results = whois_check(dns_record_check(generate_results_hash(self.list, self.tlds), self.tlds), self.tlds)
-      self.processed = true
-    end
-    
-    def return_available(tld)
-      process unless self.processed
-      
-      available_domains = []
-      
-      self.results.each do |i|
-        available_domains << "#{i[:domain]}#{tld}" if i[:tlds]["#{tld.split('.')[1]}_available"] == "y"
-      end
-      
-      return available_domains
-    end
-    
-    private
-    
-    def generate_results_hash(list, tlds)
-      results = []
-      
-      list.each do |d|
-        item = {}
-        item[:domain] = d
-        item[:tlds] = {}
-        
-        tlds.each do |tld|
-          item[:tlds]["#{tld.split('.')[1]}_available"] = "u"
-        end
-        
-        results << item
-      end
-      
-      return results
-    end
-    
-    def dns_record_check(results, tlds)
-      results.each do |i|
-        tlds.each do |tld|
-          begin
-            Resolv.getaddress("#{i[:domain]}#{tld}")
-            i[:tlds]["#{tld.split('.')[1]}_available"] = "n"
-          rescue Resolv::ResolvError
-            i[:tlds]["#{tld.split('.')[1]}_available"] = "u"
-          end
-        end
-      end
-      
-      return results
-    end
-   
-   def whois_check(results, tlds)
-     @wc = Whois::Client.new
-     @wc.timeout = nil
-     
-     results.each do |i|
-       tlds.each do |tld|
-         if i[:tlds]["#{tld.split('.')[1]}_available"] == "u"
-           begin
-             d = @wc.query("#{i[:domain]}#{tld}")
-             if d.available?
-               i[:tlds]["#{tld.split('.')[1]}_available"] = "y"
-             else
-               i[:tlds]["#{tld.split('.')[1]}_available"] = "n"
-             end
-           rescue Exception => e
-             i[:tlds]["#{tld.split('.')[1]}_available"] = "u"
-           end
-         end
-       end
-     end
-     
-     return results
-   end
 
+    def process
+      tlds.each do |tld|
+        list.each do |word|
+          next unless results[tld][word].nil?
+          registered = dns_is_registered(word, tld) || whois_is_registered(word, tld)
+          puts "#{word}#{tld} is #{registered ? 'registered' : 'available'}" if verbose
+        end
+      end
+      "OK"
+    end
+
+    def return_available(tld)
+      process unless processed == list.size * tlds.size
+      results[tld].select {|d,t| t == false }.keys
+    end
+
+    private
+
+    def dns_is_registered(word, tld)
+      Resolv.getaddress(word + tld)
+      mark(word, tld, true)
+    rescue Resolv::ResolvError
+      false
+    end
+
+    def whois_is_registered(word, tld)
+      mark(word, tld, Whois.registered?(word + tld))
+    end
+
+    def mark(word, tld, is_registered)
+      results[tld][word] = is_registered
+      self.processed += 1
+      is_registered
+    end
   end
 end
